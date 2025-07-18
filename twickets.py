@@ -1,81 +1,374 @@
+import os
 import time
 import random
-import re
-import os
+import logging
+import pickle
+from datetime import datetime, timedelta, date
 import requests
-import webbrowser
-import undetected_chromedriver as uc
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+import signal
+import re
+import html
 
-# === Load env vars ===
-load_dotenv()
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-TEST_MODE = os.getenv("TEST_MODE", "False") == "True"
-OPEN_BROWSER = os.getenv("OPEN_BROWSER", "False") == "True"
-CHECK_INTERVAL = (int(os.getenv("CHECK_INTERVAL_MIN", 10)), int(os.getenv("CHECK_INTERVAL_MAX", 20)))
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import undetected_chromedriver as uc
 
-# Twickets Event URL
-URL = "https://www.twickets.live/en/event/1869337143566929920#sort=FirstListed&typeFilter=Any&qFilter=1"
+load_dotenv(override=True)
 
-def send_telegram(msg):
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}
-        )
-    except Exception as e:
-        print(f"[!] Telegram failed: {e}")
+# Configuration from environment variables
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID").split(",") if os.getenv("CHAT_ID") else []
+EVENT_URL = os.getenv("EVENT_URL")
+TEST_MODE = os.getenv("TEST_MODE", "false").lower() == "true"
+HEARTBEAT_INTERVAL_MINUTES = int(os.getenv("HEARTBEAT_INTERVAL_MINUTES", 30))
+SLEEP_MIN = int(os.getenv("SLEEP_MIN", 20))
+SLEEP_MAX = int(os.getenv("SLEEP_MAX", 40))
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", 3))
+DRIVER_RESTART_INTERVAL = int(os.getenv("DRIVER_RESTART_INTERVAL", 100))
+RATE_LIMIT_RESTART_THRESHOLD = int(os.getenv("RATE_LIMIT_RESTART_THRESHOLD", 3))
+RATE_LIMIT_PAUSE_SECONDS = int(os.getenv("RATE_LIMIT_PAUSE_SECONDS", 900))
 
-def start_browser():
+# Logging setup with rotating files
+from logging.handlers import RotatingFileHandler
+log_handler = RotatingFileHandler("twickets.log", maxBytes=5*1024*1024, backupCount=3)
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s: %(message)s",
+    handlers=[log_handler, logging.StreamHandler()],
+)
+logger = logging.getLogger()
+
+# Stats and timing globals
+tickets_spotted = 0
+error_count = 0
+rate_limit_count = 0
+last_summary_time = datetime.now()
+current_day = date.today()
+COOKIE_FILE = "twickets_cookies.pkl"
+
+def validate_env_vars():
+    required_vars = ["TELEGRAM_BOT_TOKEN", "CHAT_ID"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        logger.error(f"Missing environment variables: {', '.join(missing)}")
+        raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
+    logger.info(f"Loaded environment variables: EVENT_URL={EVENT_URL}, "
+                f"TEST_MODE={TEST_MODE}, HEARTBEAT_INTERVAL_MINUTES={HEARTBEAT_INTERVAL_MINUTES}, "
+                f"SLEEP_MIN={SLEEP_MIN}, SLEEP_MAX={SLEEP_MAX}, MAX_RETRIES={MAX_RETRIES}, "
+                f"DRIVER_RESTART_INTERVAL={DRIVER_RESTART_INTERVAL}, "
+                f"RATE_LIMIT_RESTART_THRESHOLD={RATE_LIMIT_RESTART_THRESHOLD}, "
+                f"RATE_LIMIT_PAUSE_SECONDS={RATE_LIMIT_PAUSE_SECONDS}")
+    logger.info("Environment variables validated successfully.")
+
+def send_telegram_message(text, retries=MAX_RETRIES, backoff=5):
+    for chat_id in CHAT_ID:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": chat_id.strip(),
+            "text": text,
+            "parse_mode": "HTML",
+        }
+        for attempt in range(1, retries + 1):
+            try:
+                resp = requests.post(url, data=payload, timeout=10)
+                resp.raise_for_status()
+                logger.info(f"✅ Telegram message sent to chat ID {chat_id} on attempt {attempt}.")
+                break  # Exit retry loop on success
+            except Exception as e:
+                logger.error(f"❌ Attempt {attempt}/{retries} failed to send Telegram message to chat ID {chat_id}: {e}")
+                if attempt == retries:
+                    logger.error(f"❌ Failed to send Telegram message to chat ID {chat_id} after {retries} retries.")
+                time.sleep(backoff * attempt)
+            else:
+                break  # Exit retry loop if no exception
+
+def send_telegram_summary():
+    global tickets_spotted, error_count
+    now = datetime.now().strftime("%H:%M")
+    message = (
+        f"⏰ <b>Bot Status Update</b> ({now}):\n"
+        f"🎫 <b>Tickets Spotted</b>: {tickets_spotted}\n"
+        f"⚠️ <b>Errors</b>: {error_count}\n"
+        f"🚫 <b>Rate Limit Detections</b>: {rate_limit_count}"
+    )
+    logger.debug(f"Sending summary message to {len(CHAT_ID)} chat IDs: {CHAT_ID}")
+    send_telegram_message(message)
+
+def init_driver():
     options = uc.ChromeOptions()
-    options.headless = True
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+    ]
+    options.add_argument(f"--user-agent={random.choice(user_agents)}")
+    # Comment out headless mode to observe browser
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-gpu")
     options.add_argument("--disable-dev-shm-usage")
-    return uc.Chrome(options=options)
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    driver = uc.Chrome(options=options)
+    driver.set_page_load_timeout(30)
+    try:
+        driver.get("https://www.twickets.live")
+        with open(COOKIE_FILE, "rb") as f:
+            cookies = pickle.load(f)
+            for cookie in cookies:
+                driver.add_cookie(cookie)
+        logger.info("Cookies loaded from file.")
+    except FileNotFoundError:
+        logger.info("No cookie file found, starting fresh session.")
+    logger.info("Chrome driver initialized.")
+    return driver
+
+def restart_driver(driver):
+    global rate_limit_count
+    if driver:
+        cookies = driver.get_cookies()
+        with open(COOKIE_FILE, "wb") as f:
+            pickle.dump(cookies, f)
+        logger.info("Cookies saved to file.")
+        driver.quit()
+        logger.info("Existing driver closed.")
+    logger.info("Restarting Chrome driver...")
+    rate_limit_count = 0
+    return init_driver()
+
+def check_for_rate_limit(driver):
+    global rate_limit_count
+    try:
+        page_source = driver.page_source.lower()
+        block_terms = ["429 too many requests", "access denied", "blocked", "forbidden", "server error", "rate limit exceeded"]
+        found_terms = []
+        for term in block_terms:
+            if term in page_source:
+                found_terms.append(term)
+                match = re.search(term, page_source, re.IGNORECASE)
+                if match:
+                    start = max(0, match.start() - 100)
+                    end = min(len(page_source), match.end() + 100)
+                    context = page_source[start:end].replace('\n', ' ')
+                    logger.debug(f"Context for '{term}': ...{context}...")
+        if found_terms:
+            logger.warning(f"Rate limit or error page detected, pausing for {RATE_LIMIT_PAUSE_SECONDS} seconds. Found blocking terms: {found_terms}")
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
+            logger.debug(f"Page source saved to page_source_{timestamp}.html")
+            rate_limit_count += 1
+            time.sleep(RATE_LIMIT_PAUSE_SECONDS)
+            return True
+        return False
+    except Exception:
+        return False
 
 def check_for_tickets(driver):
-    driver.get(URL)
-    time.sleep(5)
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    listings = soup.select('div[data-testid="listing-card"]')
+    global tickets_spotted, error_count, rate_limit_count
+    try:
+        logger.info(f"🌐 Loading event page: {EVENT_URL}")
+        driver.get(EVENT_URL)
+        logger.debug(f"Page title: {driver.title}, URL: {driver.current_url}")
+        if check_for_rate_limit(driver):
+            return
 
-    found = []
-    for listing in listings:
-        if re.search(r'\b1\s+ticket\b', listing.get_text().lower()):
-            a = listing.find("a", href=True)
-            if a:
-                found.append("https://www.twickets.live" + a["href"])
-    return found
-
-def test_mode_result():
-    return ["https://www.twickets.live/simulated-ticket"]
-
-def main():
-    print("[*] Sniper running (Cloudflare-proof)...")
-    driver = start_browser()
-
-    while True:
+        # Handle cookies popup
         try:
-            matches = test_mode_result() if TEST_MODE else check_for_tickets(driver)
-            if matches:
-                for match in matches:
-                    print(f"[🎯] Ticket Found: {match}")
-                    send_telegram(f"🎟️ <b>Single Ticket Found!</b>\n{match}")
-                    if OPEN_BROWSER:
-                        webbrowser.open(match)
-                break
+            wait = WebDriverWait(driver, 10)
+            try:
+                cookie_button = wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/div[1]/div/div[2]/button[1]")))
+                cookie_button.click()
+                logger.info("Clicked cookies accept button using XPath.")
+            except:
+                logger.debug("XPath for cookies button failed, trying fallback CSS selector '.cookie-accept'")
+                cookie_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".cookie-accept")))
+                cookie_button.click()
+                logger.info("Clicked cookies accept button using CSS selector.")
+            time.sleep(random.uniform(0.5, 1.5))
+        except Exception as e:
+            logger.debug(f"No cookies popup found or failed to click: {e}")
 
-            sleep_time = random.uniform(*CHECK_INTERVAL)
-            print(f"[-] No tickets. Sleeping {sleep_time:.1f}s...")
+        # Extract event details
+        event_name = "Unknown"
+        location = "Unknown"
+        event_date = "Unknown"
+        try:
+            wait = WebDriverWait(driver, 5)
+            # Fallback to XPath for event name due to no CSS selector provided
+            event_name_element = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div/div[1]/div[2]/div[1]/div[1]/div/div[2]/div/div[1]/h1/span[1]")))
+            event_name = html.escape(event_name_element.text.strip() or "Unknown")
+            logger.debug(f"Extracted event name: {event_name}")
+        except Exception as e:
+            logger.debug(f"Failed to extract event name: {e}")
+        try:
+            venue_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#venueName > span:nth-child(2)")))
+            city_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#locationShortName > span:nth-child(1)")))
+            venue = html.escape(venue_element.text.strip() or "Unknown")
+            city = html.escape(city_element.text.strip() or "Unknown")
+            location = f"{venue}, {city}" if venue != "Unknown" and city != "Unknown" else venue or city or "Unknown"
+            logger.debug(f"Extracted location: {location}")
+        except Exception as e:
+            logger.debug(f"Failed to extract location: {e}")
+        try:
+            date_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".inline-datetime")))
+            event_date = html.escape(date_element.text.strip() or "Unknown")
+            logger.debug(f"Extracted event date: {event_date}")
+        except Exception as e:
+            logger.debug(f"Failed to extract event date: {e}")
+
+        # Check for "no tickets" message
+        try:
+            wait = WebDriverWait(driver, 5)
+            no_tickets_element = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div[1]/div[2]/div[5]/div/p/span")))
+            no_tickets_text = no_tickets_element.text.lower()
+            if "sorry, we don't currently have any tickets for this event" in no_tickets_text:
+                logger.info(f"No tickets found")
+                return
+        except Exception as e:
+            logger.debug(f"No 'no tickets' message found or failed to check: {e}")
+
+        # Simulate human behavior
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight * Math.random());")
+        time.sleep(random.uniform(0.5, 2.0))
+
+        wait = WebDriverWait(driver, 30)
+        try:
+            wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "ul#list.tickets")))
+            ticket_items = driver.find_elements(By.CSS_SELECTOR, "ul#list.tickets > li")
+        except:
+            logger.warning(f"Primary selector 'ul#list.tickets' failed, trying fallback selector 'div#listings-found'")
+            wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "div#listings-found")))
+            ticket_items = driver.find_elements(By.CSS_SELECTOR, "div#listings-found li")
+
+        logger.debug(f"Found {len(ticket_items)} ticket items")
+
+        available_tickets = []
+
+        for ticket in ticket_items:
+            try:
+                buy_button = ticket.find_elements(By.CSS_SELECTOR, "twickets-listing.width-max div.result-row-buy")
+                if buy_button:
+                    try:
+                        price_element = ticket.find_element(By.CSS_SELECTOR, "twickets-listing span strong:nth-child(2)")
+                        price = html.escape(price_element.text.strip() or "Unknown")
+                        logger.debug(f"Extracted price: {price}")
+                    except:
+                        price = "Unknown"
+                        logger.debug("Failed to extract price")
+                    try:
+                        ticket_type_elements = ticket.find_elements(By.CSS_SELECTOR, "[id^='listingPriceTier']")
+                        ticket_type = html.escape(ticket_type_elements[0].text.strip() or "Unknown") if ticket_type_elements else "Unknown"
+                        logger.debug(f"Extracted ticket type: {ticket_type}")
+                    except:
+                        ticket_type = "Unknown"
+                        logger.debug("Failed to extract ticket type")
+                    try:
+                        quantity_element = ticket.find_element(By.CSS_SELECTOR, "twickets-listing div:nth-child(2) span span")
+                        quantity = html.escape(quantity_element.text.strip() or "Unknown")
+                        logger.debug(f"Extracted quantity: {quantity}")
+                    except:
+                        quantity = "Unknown"
+                        logger.debug("Failed to extract quantity")
+                    available_tickets.append({"price": price, "quantity": quantity, "type": ticket_type})
+                else:
+                    logger.debug("No Buy button found for this ticket, skipping.")
+            except Exception as e:
+                logger.warning(f"Failed to parse ticket details: {e}")
+                available_tickets.append({"price": "Unknown", "quantity": "Unknown", "type": "Unknown"})
+
+        if TEST_MODE and random.random() < 0.3:
+            logger.debug(f"Simulating ticket find in TEST_MODE")
+            available_tickets.append({"price": f"£{random.randint(20, 100)}", "quantity": str(random.randint(1, 4)), "type": "General Admission"})
+
+        if available_tickets:
+            count = len(available_tickets)
+            tickets_spotted += count
+            logger.info(f"🎫 Found {count} ticket(s) available!")
+            alert_msg = f"🚨 <b>Found {count} ticket(s) for {event_name}</b>\n"
+            alert_msg += f"📍 <b>Location</b>: {location}\n"
+            alert_msg += f"📅 <b>Date</b>: {event_date}\n"
+            alert_msg += f"🔗 <a href=\"{html.escape(EVENT_URL)}\">Event Link</a>\n"
+            alert_msg += "----------------------------------------\n"
+            for i, ticket in enumerate(available_tickets, 1):
+                alert_msg += f"🎟️ <b>Ticket {i}</b>: <b>{ticket['type']}</b>\n"
+                alert_msg += f"   💷 <b>Price</b>: {ticket['price']}\n"
+                alert_msg += f"   🔢 <b>Quantity</b>: {ticket['quantity']}\n"
+                alert_msg += "----------------------------------------\n"
+            logger.debug(f"Sending ticket alert to {len(CHAT_ID)} chat IDs: {CHAT_ID}")
+            send_telegram_message(alert_msg)
+        else:
+            logger.info(f"No tickets with Buy button available right now.")
+
+    except Exception as e:
+        error_count += 1
+        logger.error(f"❌ Error during ticket check: {e}")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
+        logger.debug(f"Page source saved to page_source_{timestamp}.html")
+
+def reset_stats_if_new_day():
+    global current_day, tickets_spotted, error_count, rate_limit_count
+    if date.today() != current_day:
+        logger.info("🔄 New day - resetting stats.")
+        current_day = date.today()
+        tickets_spotted = 0
+        error_count = 0
+        rate_limit_count = 0
+
+def get_adaptive_sleep_time(error_count, rate_limit_count):
+    base_sleep = random.randint(SLEEP_MIN, SLEEP_MAX)
+    if error_count > 5 or rate_limit_count > 2:
+        return base_sleep + random.randint(10, 30)
+    return base_sleep
+
+def handle_shutdown(signum, frame):
+    logger.info("Received shutdown signal, exiting gracefully...")
+    raise KeyboardInterrupt
+
+def main_loop():
+    global last_summary_time, error_count, rate_limit_count
+    logger.info(
+        f"🚀 Twickets bot started. TEST_MODE={TEST_MODE}, heartbeat every {HEARTBEAT_INTERVAL_MINUTES} minutes."
+    )
+    send_telegram_summary()
+    driver = init_driver()
+    iteration_count = 0
+
+    try:
+        while True:
+            try:
+                check_for_tickets(driver)
+                iteration_count += 1
+                if iteration_count >= DRIVER_RESTART_INTERVAL or rate_limit_count >= RATE_LIMIT_RESTART_THRESHOLD:
+                    driver = restart_driver(driver)
+                    iteration_count = 0
+            except Exception as e:
+                logger.error(f"Error in check, restarting driver: {e}")
+                driver = restart_driver(driver)
+                error_count += 1
+
+            reset_stats_if_new_day()
+            if datetime.now() - last_summary_time >= timedelta(minutes=HEARTBEAT_INTERVAL_MINUTES):
+                send_telegram_summary()
+                last_summary_time = datetime.now()
+
+            sleep_time = get_adaptive_sleep_time(error_count, rate_limit_count)
+            logger.info(f"Sleeping for {sleep_time} seconds before next check...")
             time.sleep(sleep_time)
 
-        except Exception as e:
-            print(f"[!] Error: {e}")
-            time.sleep(10)
-
-    driver.quit()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user.")
+    finally:
+        driver.quit()
+        logger.info("Driver closed, exiting.")
 
 if __name__ == "__main__":
-    main()
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    signal.signal(signal.SIGINT, handle_shutdown)
+    validate_env_vars()
+    main_loop()

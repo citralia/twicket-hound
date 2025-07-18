@@ -20,8 +20,10 @@ ENV/
 .DS_Store
 
 # Docker
-*.log
 *.pid
+
+# Logs
+*.log
 
 # Other
 *.sqlite3
