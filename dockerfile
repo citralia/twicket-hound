@@ -25,4 +25,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 COPY . .
-CMD ["python", "twickets_scraper.py"]
+CMD ["python", "twickets.py"]
