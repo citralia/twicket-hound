@@ -1,0 +1,28 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Environment files
+.env
+.env.*
+
+# Virtual environments
+venv/
+ENV/
+.venv/
+
+# VSCode & PyCharm settings (optional)
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Docker
+*.log
+*.pid
+
+# Other
+*.sqlite3
