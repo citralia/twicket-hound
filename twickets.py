@@ -29,6 +29,10 @@ MAX_RETRIES = int(os.getenv("MAX_RETRIES", 3))
 DRIVER_RESTART_INTERVAL = int(os.getenv("DRIVER_RESTART_INTERVAL", 100))
 RATE_LIMIT_RESTART_THRESHOLD = int(os.getenv("RATE_LIMIT_RESTART_THRESHOLD", 3))
 RATE_LIMIT_PAUSE_SECONDS = int(os.getenv("RATE_LIMIT_PAUSE_SECONDS", 900))
+last_ticket_results = None
+last_message_time = None
+RESEND_INTERVAL_HOURS = 4  # Resend identical results every 4 hours
+
 
 # Logging setup with rotating files
 from logging.handlers import RotatingFileHandler
@@ -88,10 +92,10 @@ def send_telegram_summary():
     global tickets_spotted, error_count
     now = datetime.now().strftime("%H:%M")
     message = (
-        f"⏰ <b>Bot Status Update</b> ({now}):\n"
+        f"⏰ <b>Update</b> ({now}):\n"
         f"🎫 <b>Tickets Spotted</b>: {tickets_spotted}\n"
         f"⚠️ <b>Errors</b>: {error_count}\n"
-        f"🚫 <b>Rate Limit Detections</b>: {rate_limit_count}"
+        # f"🚫 <b>Rate Limit Detections</b>: {rate_limit_count}"
     )
     logger.debug(f"Sending summary message to {len(CHAT_ID)} chat IDs: {CHAT_ID}")
     send_telegram_message(message)
@@ -168,7 +172,7 @@ def check_for_rate_limit(driver):
         return False
 
 def check_for_tickets(driver):
-    global tickets_spotted, error_count, rate_limit_count
+    global tickets_spotted, error_count, rate_limit_count, last_ticket_results, last_message_time
     try:
         logger.info(f"🌐 Loading event page: {EVENT_URL}")
         driver.get(EVENT_URL)
@@ -198,7 +202,6 @@ def check_for_tickets(driver):
         event_date = "Unknown"
         try:
             wait = WebDriverWait(driver, 5)
-            # Fallback to XPath for event name due to no CSS selector provided
             event_name_element = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div/div[1]/div[2]/div[1]/div[1]/div/div[2]/div/div[1]/h1/span[1]")))
             event_name = html.escape(event_name_element.text.strip() or "Unknown")
             logger.debug(f"Extracted event name: {event_name}")
@@ -285,23 +288,42 @@ def check_for_tickets(driver):
             available_tickets.append({"price": f"£{random.randint(20, 100)}", "quantity": str(random.randint(1, 4)), "type": "General Admission"})
 
         if available_tickets:
+            # Create a comparable representation of ticket results
+            current_results = sorted([(t["price"], t["quantity"], t["type"]) for t in available_tickets])
+            results_hash = str(current_results)
             count = len(available_tickets)
-            tickets_spotted += count
-            logger.info(f"🎫 Found {count} ticket(s) available!")
-            alert_msg = f"🚨 <b>Found {count} ticket(s) for {event_name}</b>\n"
-            alert_msg += f"📍 <b>Location</b>: {location}\n"
-            alert_msg += f"📅 <b>Date</b>: {event_date}\n"
-            alert_msg += f"🔗 <a href=\"{html.escape(EVENT_URL)}\">Event Link</a>\n"
-            alert_msg += "----------------------------------------\n"
-            for i, ticket in enumerate(available_tickets, 1):
-                alert_msg += f"🎟️ <b>Ticket {i}</b>: <b>{ticket['type']}</b>\n"
-                alert_msg += f"   💷 <b>Price</b>: {ticket['price']}\n"
-                alert_msg += f"   🔢 <b>Quantity</b>: {ticket['quantity']}\n"
+
+            # Check if results are identical to last sent
+            should_send = False
+            if last_ticket_results is None or results_hash != last_ticket_results:
+                logger.info(f"🎫 New or changed tickets found: {count} ticket(s) available!")
+                tickets_spotted += count  # Increment only for new/changed tickets
+                should_send = True
+            elif last_message_time is None or (datetime.now() - last_message_time) >= timedelta(hours=RESEND_INTERVAL_HOURS):
+                logger.info(f"🎫 Resending identical tickets after {RESEND_INTERVAL_HOURS} hours: {count} ticket(s) available!")
+                should_send = True
+            else:
+                logger.info(f"🎫 Identical tickets found, skipping message (last sent: {last_message_time})")
+
+            if should_send:
+                alert_msg = f"🚨 <b>Found {count} ticket(s) for {event_name}</b>\n"
+                alert_msg += f"📍 <b>Location</b>: {location}\n"
+                alert_msg += f"📅 <b>Date</b>: {event_date}\n"
+                alert_msg += f"🔗 <a href=\"{html.escape(EVENT_URL)}\">Event Link</a>\n\n"
                 alert_msg += "----------------------------------------\n"
-            logger.debug(f"Sending ticket alert to {len(CHAT_ID)} chat IDs: {CHAT_ID}")
-            send_telegram_message(alert_msg)
+                alert_msg += "----------------------------------------\n"
+                for i, ticket in enumerate(available_tickets, 1):
+                    alert_msg += f"🎟️ <b>Ticket {i}</b>: <b>{ticket['type']}</b>\n"
+                    alert_msg += f"   💷 <b>Price</b>: {ticket['price']}\n"
+                    alert_msg += f"   🔢 <b>Quantity</b>: {ticket['quantity']}\n"
+                    alert_msg += "----------------------------------------\n"
+                logger.debug(f"Sending ticket alert to {len(CHAT_ID)} chat IDs: {CHAT_ID}")
+                send_telegram_message(alert_msg)
+                last_ticket_results = results_hash
+                last_message_time = datetime.now()
         else:
             logger.info(f"No tickets with Buy button available right now.")
+            last_ticket_results = None  # Reset if no tickets found
 
     except Exception as e:
         error_count += 1
