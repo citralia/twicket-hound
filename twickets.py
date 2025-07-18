@@ -182,7 +182,7 @@ def check_for_tickets(driver):
 
         # Handle cookies popup
         try:
-            wait = WebDriverWait(driver, 10)
+            wait = WebDriverWait(driver, 2)
             try:
                 cookie_button = wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/div[1]/div/div[2]/button[1]")))
                 cookie_button.click()
@@ -201,7 +201,7 @@ def check_for_tickets(driver):
         location = "Unknown"
         event_date = "Unknown"
         try:
-            wait = WebDriverWait(driver, 5)
+            wait = WebDriverWait(driver, 3)
             event_name_element = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div/div[1]/div[2]/div[1]/div[1]/div/div[2]/div/div[1]/h1/span[1]")))
             event_name = html.escape(event_name_element.text.strip() or "Unknown")
             logger.debug(f"Extracted event name: {event_name}")
@@ -225,7 +225,7 @@ def check_for_tickets(driver):
 
         # Check for "no tickets" message
         try:
-            wait = WebDriverWait(driver, 5)
+            wait = WebDriverWait(driver, 2)
             no_tickets_element = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div[1]/div[2]/div[5]/div/p/span")))
             no_tickets_text = no_tickets_element.text.lower()
             if "sorry, we don't currently have any tickets for this event" in no_tickets_text:
@@ -238,7 +238,7 @@ def check_for_tickets(driver):
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(random.uniform(3.0, 6.0))  # Increased delay for dynamic content
 
-        wait = WebDriverWait(driver, 60)  # Extended timeout
+        wait = WebDriverWait(driver, 6) 
         ticket_items = []
         selector_attempts = [
             ("ul#list.tickets > li", "primary selector 'ul#list.tickets > li'"),
@@ -377,7 +377,6 @@ def main_loop():
     logger.info(
         f"🚀 Twickets bot started. TEST_MODE={TEST_MODE}, heartbeat every {HEARTBEAT_INTERVAL_MINUTES} minutes."
     )
-    send_telegram_summary()
     driver = init_driver()
     iteration_count = 0
 

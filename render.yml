@@ -1,6 +1,0 @@
-services:
-  - type: worker
-    name: twicket-hound
-    env: docker
-    plan: free
-    autoDeploy: true
