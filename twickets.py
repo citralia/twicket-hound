@@ -109,26 +109,63 @@ def init_driver():
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
     ]
     options.add_argument(f"--user-agent={random.choice(user_agents)}")
-    # Comment out headless mode to observe browser
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    driver = uc.Chrome(options=options)
-    driver.set_page_load_timeout(30)
+
+    # Dynamically find Chrome binary
+    possible_paths = [
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/lib/chromium-browser/chrome",
+        "/usr/lib/chromium/chromium",
+        "/opt/google/chrome/chrome",
+        "/usr/local/bin/google-chrome",
+        "/app/.apt/usr/bin/google-chrome"  # Railway-specific path
+    ]
+    chrome_binary = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            chrome_binary = path
+            logger.info(f"Found Chrome binary at {chrome_binary}")
+            break
+    if not chrome_binary:
+        # Fallback: search filesystem
+        import subprocess
+        try:
+            result = subprocess.run(["find", "/", "-type", "f", "-name", "google-chrome*"], capture_output=True, text=True)
+            paths = result.stdout.splitlines()
+            for path in paths:
+                if os.path.exists(path) and "google-chrome" in path:
+                    chrome_binary = path
+                    logger.info(f"Found Chrome binary via search at {chrome_binary}")
+                    break
+        except Exception as e:
+            logger.error(f"Failed to search for Chrome binary: {e}")
+        if not chrome_binary:
+            logger.error("No Chrome binary found in expected paths")
+            raise RuntimeError("Chrome binary not found")
+
     try:
-        driver.get("https://www.twickets.live")
-        with open(COOKIE_FILE, "rb") as f:
-            cookies = pickle.load(f)
-            for cookie in cookies:
-                driver.add_cookie(cookie)
-        logger.info("Cookies loaded from file.")
-    except FileNotFoundError:
-        logger.info("No cookie file found, starting fresh session.")
-    logger.info("Chrome driver initialized.")
-    return driver
+        driver = uc.Chrome(options=options, browser_executable_path=chrome_binary)
+        driver.set_page_load_timeout(30)
+        try:
+            driver.get("https://www.twickets.live")
+            with open(COOKIE_FILE, "rb") as f:
+                cookies = pickle.load(f)
+                for cookie in cookies:
+                    driver.add_cookie(cookie)
+            logger.info("Cookies loaded from file.")
+        except FileNotFoundError:
+            logger.info("No cookie file found, starting fresh session.")
+        logger.info("Chrome driver initialized.")
+        return driver
+    except Exception as e:
+        logger.error(f"Failed to initialize Chrome driver: {e}")
+        raise
 
 def restart_driver(driver):
     global rate_limit_count
