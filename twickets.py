@@ -377,7 +377,7 @@ def main_loop():
     logger.info(
         f"🚀 Twickets bot started. TEST_MODE={TEST_MODE}, heartbeat every {HEARTBEAT_INTERVAL_MINUTES} minutes."
     )
-    send_telegram_summary()
+    # send_telegram_summary()
     driver = init_driver()
     iteration_count = 0
 
