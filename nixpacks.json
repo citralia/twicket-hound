@@ -2,13 +2,27 @@
   "providers": ["python"],
   "phases": {
     "setup": {
-      "nixPkgs": ["python39", "wget", "gnupg2", "ca-certificates", "fonts-liberation", "libappindicator3-1", "libasound2", "libatk-bridge2-0", "libatk1-0", "libcurl4", "libgbm1", "libnspr4", "libnss3", "libu2f-udev", "libxss1"],
-      "aptPkgs": ["google-chrome-stable"],
+      "nixPkgs": ["python39", "wget", "gnupg2", "ca-certificates"],
+      "aptPkgs": [
+        "google-chrome-stable",
+        "fonts-liberation",
+        "libappindicator3-1",
+        "libasound2",
+        "libatk-bridge2.0-0",
+        "libatk1.0-0",
+        "libcurl4",
+        "libgbm1",
+        "libnspr4",
+        "libnss3",
+        "libu2f-udev",
+        "libxss1"
+      ],
       "cmds": [
-        "wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -",
-        "echo 'deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main' >> /etc/apt/sources.list.d/google-chrome.list",
         "apt-get update",
-        "apt-get install -y google-chrome-stable",
+        "wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -",
+        "echo 'deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main' > /etc/apt/sources.list.d/google-chrome.list",
+        "apt-get update",
+        "apt-get install -y --no-install-recommends google-chrome-stable",
         "chmod +x /usr/bin/google-chrome",
         "find / -name 'google-chrome*' 2>/dev/null || true"
       ]
