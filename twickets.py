@@ -9,13 +9,17 @@ from dotenv import load_dotenv
 import signal
 import re
 import html
+import os
 
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-# import undetected_chromedriver as uc
+import undetected_chromedriver as uc
 
 load_dotenv(override=True)
+chrome_bin = os.environ.get("CHROME_BIN", "/usr/bin/chromium")
 
 # Configuration from environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -101,47 +105,23 @@ def send_telegram_summary():
     send_telegram_message(message)
 
 def init_driver():
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.set_capability('browserless:token', os.environ['BROWSER_TOKEN'])
-    # Set args similar to puppeteer's for best performance
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--disable-background-timer-throttling")
-    chrome_options.add_argument("--disable-backgrounding-occluded-windows")
-    chrome_options.add_argument("--disable-breakpad")
-    chrome_options.add_argument("--disable-component-extensions-with-background-pages")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-features=TranslateUI,BlinkGenPropertyTrees")
-    chrome_options.add_argument("--disable-ipc-flooding-protection")
-    chrome_options.add_argument("--disable-renderer-backgrounding")
-    chrome_options.add_argument("--enable-features=NetworkService,NetworkServiceInProcess")
-    chrome_options.add_argument("--force-color-profile=srgb")
-    chrome_options.add_argument("--hide-scrollbars")
-    chrome_options.add_argument("--metrics-recording-only")
-    chrome_options.add_argument("--mute-audio")
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-
-    driver = webdriver.Remote(
-    command_executor=os.environ['BROWSER_WEBDRIVER_ENDPOINT'],
-    options=chrome_options
-)
-    # options = uc.ChromeOptions()
-    # user_agents = [
-    #     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    #     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
-    #     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36",
-    #     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
-    # ]
-    # options.add_argument(f"--user-agent={random.choice(user_agents)}")
-    # # Comment out headless mode to observe browser
-    # options.add_argument("--headless=new")
-    # options.add_argument("--no-sandbox")
-    # options.add_argument("--disable-gpu")
-    # options.add_argument("--disable-dev-shm-usage")
-    # options.add_argument("--window-size=1920,1080")
-    # options.add_argument("--disable-blink-features=AutomationControlled")
-    driver = uc.Chrome(options=options)
+    options = Options()
+    options.binary_location = chrome_bin
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+    ]
+    options.add_argument(f"--user-agent={random.choice(user_agents)}")
+    # Comment out headless mode to observe browser
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    driver = webdriver.Chrome(options=options)
     driver.set_page_load_timeout(30)
     try:
         driver.get("https://www.twickets.live")
