@@ -176,7 +176,7 @@ def check_for_tickets(driver):
     try:
         logger.info(f"🌐 Loading event page: {EVENT_URL}")
         driver.get(EVENT_URL)
-        logger.debug(f"Page title: {driver.title}, URL: {driver.current_url}")
+        logger.debug(f"Page title: {driver.title}, URL: {driver.current_url}, Chrome version: {driver.capabilities['browserVersion']}, Headless: {driver.capabilities.get('chrome', {}).get('headless', False)}")
         if check_for_rate_limit(driver):
             return
 
@@ -236,16 +236,39 @@ def check_for_tickets(driver):
 
         # Simulate human behavior
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight * Math.random());")
-        time.sleep(random.uniform(0.5, 2.0))
+        time.sleep(random.uniform(2.0, 5.0))
 
-        wait = WebDriverWait(driver, 30)
+        wait = WebDriverWait(driver, 60)
+        ticket_items = []
         try:
             wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "ul#list.tickets")))
             ticket_items = driver.find_elements(By.CSS_SELECTOR, "ul#list.tickets > li")
+            logger.debug(f"Found {len(ticket_items)} ticket items with primary selector 'ul#list.tickets'")
         except:
-            logger.warning(f"Primary selector 'ul#list.tickets' failed, trying fallback selector 'div#listings-found'")
-            wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "div#listings-found")))
-            ticket_items = driver.find_elements(By.CSS_SELECTOR, "div#listings-found li")
+            logger.warning(f"Primary selector 'ul#list.tickets' failed, trying fallback selector '[id*=\"listing\"] li'")
+            try:
+                wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[id*='listing'] li")))
+                ticket_items = driver.find_elements(By.CSS_SELECTOR, "[id*='listing'] li")
+                logger.debug(f"Found {len(ticket_items)} ticket items with fallback selector '[id*=\"listing\"] li'")
+            except:
+                logger.warning(f"Fallback selector '[id*=\"listing\"] li' failed, trying final fallback 'twickets-listing'")
+                try:
+                    wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "twickets-listing")))
+                    ticket_items = driver.find_elements(By.CSS_SELECTOR, "twickets-listing")
+                    logger.debug(f"Found {len(ticket_items)} ticket items with final fallback 'twickets-listing'")
+                except Exception as e:
+                    logger.error(f"All ticket selectors failed: {e}", exc_info=True)
+                    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
+                        f.write(driver.page_source)
+                    logger.debug(f"Page source saved to page_source_{timestamp}.html")
+                    # Check page content for clues
+                    page_text = driver.page_source.lower()
+                    error_indicators = ["captcha", "blocked", "access denied"]
+                    found_indicators = [term for term in error_indicators if term in page_text]
+                    if found_indicators:
+                        logger.warning(f"Possible blocking detected: {found_indicators}")
+                    return
 
         logger.debug(f"Found {len(ticket_items)} ticket items")
 
@@ -309,13 +332,12 @@ def check_for_tickets(driver):
                 alert_msg = f"🚨 <b>Found {count} ticket(s) for {event_name}</b>\n"
                 alert_msg += f"📍 <b>Location</b>: {location}\n"
                 alert_msg += f"📅 <b>Date</b>: {event_date}\n"
-                alert_msg += f"🔗 <a href=\"{html.escape(EVENT_URL)}\">Event Link</a>\n\n"
-                alert_msg += "----------------------------------------\n"
+                alert_msg += f"🔗 <a href=\"{html.escape(EVENT_URL)}\">Event Link</a>\n"
                 alert_msg += "----------------------------------------\n"
                 for i, ticket in enumerate(available_tickets, 1):
                     alert_msg += f"🎟️ <b>Ticket {i}</b>: <b>{ticket['type']}</b>\n"
-                    alert_msg += f"   💷 <b>Price</b>: {ticket['price']}\n"
-                    alert_msg += f"   🔢 <b>Quantity</b>: {ticket['quantity']}\n"
+                    alert_msg += f"💷    <b>Price</b>: {ticket['price']}\n"
+                    alert_msg += f"🔢    <b>Quantity</b>: {ticket['quantity']}\n"
                     alert_msg += "----------------------------------------\n"
                 logger.debug(f"Sending ticket alert to {len(CHAT_ID)} chat IDs: {CHAT_ID}")
                 send_telegram_message(alert_msg)
@@ -327,7 +349,7 @@ def check_for_tickets(driver):
 
     except Exception as e:
         error_count += 1
-        logger.error(f"❌ Error during ticket check: {e}")
+        logger.error(f"❌ Error during ticket check: {e}", exc_info=True)
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
             f.write(driver.page_source)
