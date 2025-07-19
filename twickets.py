@@ -280,7 +280,6 @@ def check_for_tickets(driver):
             logger.debug(f"Failed to extract event date: {e}")
 
         # Check for "no tickets" message
-        no_tickets=False
         try:
             wait = WebDriverWait(driver, 2)
             no_tickets_element = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div[1]/div[2]/div[5]/div/p/span")))
@@ -321,7 +320,7 @@ def check_for_tickets(driver):
                     f.write(driver.page_source)
                 logger.debug(f"Page source saved to page_source_{timestamp}.html")
                 page_text = driver.page_source.lower()
-                error_indicators = ["captcha", "blocked", "access denied", "forbidden", "429"]
+                error_indicators = ["captcha", "blocked", "access denied", "forbidden"]
                 found_indicators = [term for term in error_indicators if term in page_text]
                 if found_indicators:
                     logger.warning(f"Possible blocking detected: {found_indicators}")
