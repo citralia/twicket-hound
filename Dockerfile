@@ -1,3 +1,5 @@
+# Use Python 3.12 slim image
+
 FROM python:3.12-slim
 
 Set working directory
@@ -24,11 +26,11 @@ ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 
 ENV DISPLAY=:99
 
-Create directories for logs and data
+# Create directories for logs and data
 
 RUN mkdir -p /app/logs /app/data && chmod -R 777 /app/logs /app/data
 
-Copy requirements and install
+# Copy requirements and install
 
 COPY requirements.txt . RUN pip install --no-cache-dir -r requirements.txt
 
@@ -36,6 +38,6 @@ Copy application code
 
 COPY twickets.py .
 
-Start Xvfb and ChromeDriver with optimized settings
+# Start Xvfb and ChromeDriver with optimized settings
 
 CMD ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24 -nolisten tcp & /usr/bin/chromedriver --port=37207 --whitelisted-ips= --allowed-origins=* & python twickets.py"]
