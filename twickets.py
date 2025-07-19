@@ -10,6 +10,8 @@ import signal
 import re
 import html
 import os
+from shutil import which
+
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -103,8 +105,43 @@ def send_telegram_summary():
     logger.debug(f"Sending summary message to {len(CHAT_ID)} chat IDs: {CHAT_ID}")
     send_telegram_message(message)
 
+def get_chrome_binary_path():
+    # 1. Use environment variable if set
+    env_path = os.getenv("CHROME_BIN")
+    if env_path and os.path.exists(env_path):
+        return env_path
+
+    # 2. Look for common Chrome/Chromium paths
+    possible_paths = [
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/google-chrome",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        which("chromium"),
+        which("google-chrome"),
+        which("chrome"),
+    ]
+
+    for path in possible_paths:
+        if path and os.path.exists(path):
+            return path
+
+    # 3. Return None if not found
+    return None
+
+def get_chromedriver_path():
+    # Prefer chromedriver in PATH or a known location
+    possible_paths = [
+        "/usr/bin/chromedriver",
+        which("chromedriver"),
+    ]
+    for path in possible_paths:
+        if path and os.path.exists(path):
+            return path
+    return None
+
 def init_driver():
-    options = Options()
+    options = uc.ChromeOptions()
     options.binary_location = chrome_bin
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -120,8 +157,22 @@ def init_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    driver = webdriver.Chrome(options=options)
-    driver.set_page_load_timeout(30)
+    
+    chromedriver_path = get_chromedriver_path()
+
+    chrome_binary = get_chrome_binary_path()
+    if chrome_binary:
+        options.binary_location = chrome_binary
+
+    chromedriver_path = get_chromedriver_path()
+
+    if chromedriver_path:
+        service = Service(chromedriver_path)
+        driver = uc.Chrome(service=service, options=options)
+    else:
+        # fallback to selenium-manager
+        driver = uc.Chrome(options=options)
+
     try:
         driver.get("https://www.twickets.live")
         with open(COOKIE_FILE, "rb") as f:
