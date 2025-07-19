@@ -154,16 +154,15 @@ def init_driver():
     options.add_argument("--disable-background-networking")
     options.add_experimental_option("prefs", {
         "profile.default_content_setting_values": {
-            "images": 2,  # Disable images (reinforce)
-            "javascript": 1  # Enable JavaScript (required for Twickets)
+            "images": 2,
+            "javascript": 1
         },
         "network.throttling": {
-            "download": 1000,  # 1 Mbps
+            "download": 1000,
             "upload": 1000,
             "latency": 40
         }
     })
-    
     chromedriver_path = get_chromedriver_path()
     if chromedriver_path:
         service = Service(chromedriver_path, log_path="/app/logs/chromedriver.log")
@@ -171,21 +170,44 @@ def init_driver():
     else:
         driver = uc.Chrome(options=options, browser_executable_path=chrome_binary)
     
-    if cookies_cache:
+    try:
+        driver.set_page_load_timeout(20)  # Set timeout for initial navigation
         driver.get("https://www.twickets.live")
-        for cookie in cookies_cache:
-            driver.add_cookie(cookie)
-        logger.info("Cookies loaded from cache.")
-    else:
-        try:
-            driver.get("https://www.twickets.live")
-            with open(COOKIE_FILE, "rb") as f:
-                cookies_cache = pickle.load(f)
-                for cookie in cookies_cache:
-                    driver.add_cookie(cookie)
-            logger.info("Cookies loaded from file.")
-        except FileNotFoundError:
-            logger.info("No cookie file found, starting fresh session.")
+        if cookies_cache:
+            for cookie in cookies_cache:
+                for attempt in range(1, MAX_RETRIES + 1):
+                    try:
+                        driver.add_cookie(cookie)
+                        break
+                    except (TimeoutException, WebDriverException) as e:
+                        logger.warning(f"Attempt {attempt}/{MAX_RETRIES} failed to add cookie: {e}")
+                        if attempt == MAX_RETRIES:
+                            logger.error("Failed to add cookies after retries")
+                            break
+                        time.sleep(1)
+            logger.info("Cookies loaded from cache.")
+        else:
+            try:
+                with open(COOKIE_FILE, "rb") as f:
+                    cookies_cache = pickle.load(f)
+                    for cookie in cookies_cache:
+                        for attempt in range(1, MAX_RETRIES + 1):
+                            try:
+                                driver.add_cookie(cookie)
+                                break
+                            except (TimeoutException, WebDriverException) as e:
+                                logger.warning(f"Attempt {attempt}/{MAX_RETRIES} failed to add cookie: {e}")
+                                if attempt == MAX_RETRIES:
+                                    logger.error("Failed to add cookies after retries")
+                                    break
+                                time.sleep(1)
+                logger.info("Cookies loaded from file.")
+            except FileNotFoundError:
+                logger.info("No cookie file found, starting fresh session.")
+    except Exception as e:
+        logger.error(f"Failed to initialize driver: {e}")
+        driver.quit()
+        raise
     logger.info("Chrome driver initialized.")
     return driver
 

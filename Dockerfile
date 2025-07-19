@@ -40,4 +40,5 @@ COPY twickets.py .
 
 # Start Xvfb and ChromeDriver with optimized settings
 
-CMD ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24 -nolisten tcp & /usr/bin/chromedriver --port=37207 --whitelisted-ips= --allowed-origins=* & python twickets.py"]
+# Start Xvfb and ChromeDriver with optimized settings
+CMD ["sh", "-c", "[ -f /usr/bin/chromedriver ] || (echo 'chromedriver not found' && exit 1); Xvfb :99 -screen 0 1024x768x24 -nolisten tcp & /usr/bin/chromedriver --port=37207 --whitelisted-ips= --allowed-origins=* --log-path=/app/logs/chromedriver.log & python twickets.py"]
