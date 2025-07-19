@@ -32,7 +32,7 @@ RUN mkdir -p /app/logs /app/data && chmod -R 777 /app/logs /app/data
 
 COPY requirements.txt . RUN pip install --no-cache-dir -r requirements.txt
 
-Copy application code
+# Copy application code
 
 COPY twickets.py .
 
