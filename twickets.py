@@ -246,23 +246,39 @@ async def check_for_tickets(driver):
     global tickets_spotted, error_count, rate_limit_count, last_ticket_results, last_message_time
     
     try:
-        logger.info(f"🌐 Loading event page: {EVENT_URL}")
-        driver.delete_all_cookies()  # Clear cookies to reduce memory
-        if cookies_cache:
-            for cookie in cookies_cache:
-                driver.add_cookie(cookie)
+    logger.info(f"🌐 Loading event page: {EVENT_URL}")
+    driver.delete_all_cookies()
+    if cookies_cache:
+        for cookie in cookies_cache:
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    driver.add_cookie(cookie)
+                    break
+                except (TimeoutException, WebDriverException) as e:
+                    logger.warning(f"Attempt {attempt}/{MAX_RETRIES} failed to add cookie: {e}")
+                    if attempt == MAX_RETRIES:
+                        logger.error("Failed to add cookies after retries")
+                        break
+                    time.sleep(1)
+    timeout = 30  # Base timeout
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
-            driver.set_page_load_timeout(30)
+            driver.set_page_load_timeout(timeout)
             driver.get(EVENT_URL)
+            break  # Exit retry loop on success
         except (TimeoutException, ReadTimeout, ReadTimeoutError, ConnectionError, WebDriverException) as e:
-            logger.error(f"Timeout or connection error loading {EVENT_URL}: {e}")
-            error_count += 1
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            with open(f"/app/logs/page_source_{timestamp}.html", "w", encoding="utf-8") as f:
-                f.write(driver.page_source[:10000] or "No page source available")
-            logger.debug(f"Page source saved to page_source_{timestamp}.html")
-            return
-
+            logger.warning(f"Attempt {attempt}/{MAX_RETRIES} timed out loading {EVENT_URL}: {e}")
+            driver.execute_script("window.stop();")  # Stop loading to free resources
+            timeout += 10  # Increase timeout for next attempt
+            if attempt == MAX_RETRIES:
+                logger.error(f"Timeout loading {EVENT_URL} after {MAX_RETRIES} retries")
+                error_count += 1
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                with open(f"/app/logs/page_source_{timestamp}.html", "w", encoding="utf-8") as f:
+                    f.write(driver.page_source[:10000] or "No page source available")
+                logger.debug(f"Page source saved to page_source_{timestamp}.html")
+                return
+            
         logger.debug(f"Page title: {driver.title}, URL: {driver.current_url}")
         
         if check_for_rate_limit(driver):
