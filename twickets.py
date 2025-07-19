@@ -152,6 +152,17 @@ def init_driver():
     options.add_argument("--blink-settings=imagesEnabled=false")
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-background-networking")
+    options.add_experimental_option("prefs", {
+        "profile.default_content_setting_values": {
+            "images": 2,  # Disable images (reinforce)
+            "javascript": 1  # Enable JavaScript (required for Twickets)
+        },
+        "network.throttling": {
+            "download": 1000,  # 1 Mbps
+            "upload": 1000,
+            "latency": 40
+        }
+    })
     
     chromedriver_path = get_chromedriver_path()
     if chromedriver_path:
@@ -219,7 +230,7 @@ async def check_for_tickets(driver):
             for cookie in cookies_cache:
                 driver.add_cookie(cookie)
         try:
-            driver.set_page_load_timeout(20)  # Reduced timeout
+            driver.set_page_load_timeout(30)
             driver.get(EVENT_URL)
         except (TimeoutException, ReadTimeout, ReadTimeoutError, ConnectionError, WebDriverException) as e:
             logger.error(f"Timeout or connection error loading {EVENT_URL}: {e}")
