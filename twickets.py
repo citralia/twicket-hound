@@ -297,18 +297,19 @@ def check_for_tickets(driver):
         wait = WebDriverWait(driver, 6) 
         ticket_items = []
 
-        
         TICKET_SELECTOR = ".buy-button"
-        ticket_items = [] # Initialize as an empty list
-
+        wait = WebDriverWait(driver, 6)
+    
         try:
-            # Wait for the elements to be visible and then find them
-            wait.until(EC.visibility_of_any_elements_located((By.CSS_SELECTOR, TICKET_SELECTOR)))
-            ticket_items = driver.find_elements(By.CSS_SELECTOR, TICKET_SELECTOR)
-            logger.debug(f"Found {len(ticket_items)} ticket items with selector '{TICKET_SELECTOR}'")
+            ticket_items = wait.until(EC.visibility_of_any_elements_located((By.CSS_SELECTOR, TICKET_SELECTOR)))
+            logger.debug(f"Found {len(ticket_items)} ticket items")
+            return ticket_items
         except Exception as e:
-            # This will run if the selector finds no elements after the wait period
-            logger.warning(f"Selector '{TICKET_SELECTOR}' failed: {e}")
+            logger.warning(f"No tickets found: {e}")
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
+            logger.debug(f"Page source saved to page_source_{timestamp}.html")
 
         if not ticket_items:
             logger.error(f"All ticket selectors failed")
@@ -317,7 +318,7 @@ def check_for_tickets(driver):
                 f.write(driver.page_source)
             logger.debug(f"Page source saved to page_source_{timestamp}.html")
             page_text = driver.page_source.lower()
-            error_indicators = ["captcha", "blocked", "access denied", "error", "forbidden", "429"]
+            error_indicators = ["captcha", "blocked", "access denied", "forbidden", "429"]
             found_indicators = [term for term in error_indicators if term in page_text]
             if found_indicators:
                 logger.warning(f"Possible blocking detected: {found_indicators}")
