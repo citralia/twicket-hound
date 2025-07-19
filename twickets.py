@@ -297,6 +297,7 @@ def check_for_tickets(driver):
 
         wait = WebDriverWait(driver, 6) 
         ticket_items = []
+        available_tickets = []
 
         TICKET_SELECTOR = ".buy-button"
         wait = WebDriverWait(driver, 6)
@@ -327,8 +328,6 @@ def check_for_tickets(driver):
                 return
 
             logger.debug(f"Found {len(ticket_items)} ticket items")
-
-            available_tickets = []
 
             for ticket in ticket_items:
                 try:
