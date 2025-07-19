@@ -279,21 +279,17 @@ def check_for_tickets(driver):
         except Exception as e:
             logger.debug(f"Failed to extract event date: {e}")
 
-        no_tickets = False
+        # Check for "no tickets" message
+        no_tickets=False
         try:
             wait = WebDriverWait(driver, 2)
             no_tickets_element = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div[1]/div[2]/div[5]/div/p/span")))
             no_tickets_text = no_tickets_element.text.lower()
             if "sorry, we don't currently have any tickets for this event" in no_tickets_text:
-                logger.info("No tickets found")
-                no_tickets = True
+                logger.info(f"No tickets found")
+                return no_tickets
         except Exception as e:
             logger.debug(f"No 'no tickets' message found or failed to check: {e}")
-
-        # If no tickets message found, return early to wait for next search
-        if no_tickets:
-            last_ticket_results = None  # Reset results since no tickets are available
-            return
 
         # Ensure full page load
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -305,65 +301,66 @@ def check_for_tickets(driver):
         TICKET_SELECTOR = ".buy-button"
         wait = WebDriverWait(driver, 6)
     
-        try:
-            ticket_items = wait.until(EC.visibility_of_any_elements_located((By.CSS_SELECTOR, TICKET_SELECTOR)))
-            logger.debug(f"Found {len(ticket_items)} ticket items")
-            return ticket_items
-        except Exception as e:
-            logger.warning(f"No tickets found: {e}")
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
-                f.write(driver.page_source)
-            logger.debug(f"Page source saved to page_source_{timestamp}.html")
-
-        if not ticket_items:
-            logger.error(f"All ticket selectors failed")
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
-                f.write(driver.page_source)
-            logger.debug(f"Page source saved to page_source_{timestamp}.html")
-            page_text = driver.page_source.lower()
-            error_indicators = ["captcha", "blocked", "access denied", "forbidden", "429"]
-            found_indicators = [term for term in error_indicators if term in page_text]
-            if found_indicators:
-                logger.warning(f"Possible blocking detected: {found_indicators}")
-            return
-
-        logger.debug(f"Found {len(ticket_items)} ticket items")
-
-        available_tickets = []
-
-        for ticket in ticket_items:
+        if not no_tickets:
             try:
-                buy_button = ticket.find_elements(By.CSS_SELECTOR, "twickets-listing.width-max div.result-row-buy")
-                if buy_button:
-                    try:
-                        price_element = ticket.find_element(By.CSS_SELECTOR, "twickets-listing span strong:nth-child(2)")
-                        price = html.escape(price_element.text.strip() or "Unknown")
-                        logger.debug(f"Extracted price: {price}")
-                    except:
-                        price = "Unknown"
-                        logger.debug("Failed to extract price")
-                    try:
-                        ticket_type_elements = ticket.find_elements(By.CSS_SELECTOR, "[id^='listingPriceTier']")
-                        ticket_type = html.escape(ticket_type_elements[0].text.strip() or "Unknown") if ticket_type_elements else "Unknown"
-                        logger.debug(f"Extracted ticket type: {ticket_type}")
-                    except:
-                        ticket_type = "Unknown"
-                        logger.debug("Failed to extract ticket type")
-                    try:
-                        quantity_element = ticket.find_element(By.CSS_SELECTOR, "twickets-listing div:nth-child(2) span span")
-                        quantity = html.escape(quantity_element.text.strip() or "Unknown")
-                        logger.debug(f"Extracted quantity: {quantity}")
-                    except:
-                        quantity = "Unknown"
-                        logger.debug("Failed to extract quantity")
-                    available_tickets.append({"price": price, "quantity": quantity, "type": ticket_type})
-                else:
-                    logger.debug("No Buy button found for this ticket, skipping.")
+                ticket_items = wait.until(EC.visibility_of_any_elements_located((By.CSS_SELECTOR, TICKET_SELECTOR)))
+                logger.debug(f"Found {len(ticket_items)} ticket items")
+                return ticket_items
             except Exception as e:
-                logger.warning(f"Failed to parse ticket details: {e}")
-                available_tickets.append({"price": "Unknown", "quantity": "Unknown", "type": "Unknown"})
+                logger.warning(f"No tickets found: {e}")
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
+                    f.write(driver.page_source)
+                logger.debug(f"Page source saved to page_source_{timestamp}.html")
+
+            if not ticket_items:
+                logger.error(f"All ticket selectors failed")
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
+                    f.write(driver.page_source)
+                logger.debug(f"Page source saved to page_source_{timestamp}.html")
+                page_text = driver.page_source.lower()
+                error_indicators = ["captcha", "blocked", "access denied", "forbidden", "429"]
+                found_indicators = [term for term in error_indicators if term in page_text]
+                if found_indicators:
+                    logger.warning(f"Possible blocking detected: {found_indicators}")
+                return
+
+            logger.debug(f"Found {len(ticket_items)} ticket items")
+
+            available_tickets = []
+
+            for ticket in ticket_items:
+                try:
+                    buy_button = ticket.find_elements(By.CSS_SELECTOR, "twickets-listing.width-max div.result-row-buy")
+                    if buy_button:
+                        try:
+                            price_element = ticket.find_element(By.CSS_SELECTOR, "twickets-listing span strong:nth-child(2)")
+                            price = html.escape(price_element.text.strip() or "Unknown")
+                            logger.debug(f"Extracted price: {price}")
+                        except:
+                            price = "Unknown"
+                            logger.debug("Failed to extract price")
+                        try:
+                            ticket_type_elements = ticket.find_elements(By.CSS_SELECTOR, "[id^='listingPriceTier']")
+                            ticket_type = html.escape(ticket_type_elements[0].text.strip() or "Unknown") if ticket_type_elements else "Unknown"
+                            logger.debug(f"Extracted ticket type: {ticket_type}")
+                        except:
+                            ticket_type = "Unknown"
+                            logger.debug("Failed to extract ticket type")
+                        try:
+                            quantity_element = ticket.find_element(By.CSS_SELECTOR, "twickets-listing div:nth-child(2) span span")
+                            quantity = html.escape(quantity_element.text.strip() or "Unknown")
+                            logger.debug(f"Extracted quantity: {quantity}")
+                        except:
+                            quantity = "Unknown"
+                            logger.debug("Failed to extract quantity")
+                        available_tickets.append({"price": price, "quantity": quantity, "type": ticket_type})
+                    else:
+                        logger.debug("No Buy button found for this ticket, skipping.")
+                except Exception as e:
+                    logger.warning(f"Failed to parse ticket details: {e}")
+                    available_tickets.append({"price": "Unknown", "quantity": "Unknown", "type": "Unknown"})
 
         if TEST_MODE and random.random() < 0.3:
             logger.debug(f"Simulating ticket find in TEST_MODE")
