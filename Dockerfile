@@ -6,7 +6,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-Install system dependencies in one layer
+# Install system dependencies in one layer
 
 # Install system dependencies in one layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
