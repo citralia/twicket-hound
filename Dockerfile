@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
     [ -f /usr/bin/chromium ] || (echo "Chromium not found at /usr/bin/chromium" && exit 1)
 
-Set environment variables
+# Set environment variables
 
 ENV CHROME_BIN=/usr/bin/chromium 
 
