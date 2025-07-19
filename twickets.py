@@ -280,6 +280,7 @@ def check_for_tickets(driver):
             logger.debug(f"Failed to extract event date: {e}")
 
         # Check for "no tickets" message
+        no_tickets=False
         try:
             wait = WebDriverWait(driver, 2)
             no_tickets_element = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div[1]/div[2]/div[5]/div/p/span")))
@@ -287,7 +288,6 @@ def check_for_tickets(driver):
             if "sorry, we don't currently have any tickets for this event" in no_tickets_text:
                 logger.info(f"No tickets found")
                 no_tickets=True
-                return
         except Exception as e:
             logger.debug(f"No 'no tickets' message found or failed to check: {e}")
 
