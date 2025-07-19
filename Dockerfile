@@ -30,7 +30,9 @@ RUN mkdir -p /app/logs /app/data && chmod -R 777 /app/logs /app/data
 
 # Copy requirements and install
 
-COPY requirements.txt . RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt . 
+
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 
