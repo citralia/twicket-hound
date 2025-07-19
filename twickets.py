@@ -296,20 +296,19 @@ def check_for_tickets(driver):
 
         wait = WebDriverWait(driver, 6) 
         ticket_items = []
-        selector_attempts = [
-            ("ul#list.tickets > li", "primary selector 'ul#list.tickets > li'"),
-            ("[id*='listing'] li", "fallback selector '[id*=\"listing\"] li'"),
-            ("twickets-listing", "final fallback 'twickets-listing'"),
-            ("div[class*='listing']", "broad fallback 'div[class*=\"listing\"]'")
-        ]
-        for selector, desc in selector_attempts:
-            try:
-                wait.until(EC.visibility_of_any_elements_located((By.CSS_SELECTOR, selector)))
-                ticket_items = driver.find_elements(By.CSS_SELECTOR, selector)
-                logger.debug(f"Found {len(ticket_items)} ticket items with {desc}")
-                break
-            except Exception as e:
-                logger.warning(f"Selector '{selector}' failed: {e}")
+
+        
+        TICKET_SELECTOR = ".buy-button"
+        ticket_items = [] # Initialize as an empty list
+
+        try:
+            # Wait for the elements to be visible and then find them
+            wait.until(EC.visibility_of_any_elements_located((By.CSS_SELECTOR, TICKET_SELECTOR)))
+            ticket_items = driver.find_elements(By.CSS_SELECTOR, TICKET_SELECTOR)
+            logger.debug(f"Found {len(ticket_items)} ticket items with selector '{TICKET_SELECTOR}'")
+        except Exception as e:
+            # This will run if the selector finds no elements after the wait period
+            logger.warning(f"Selector '{TICKET_SELECTOR}' failed: {e}")
 
         if not ticket_items:
             logger.error(f"All ticket selectors failed")
