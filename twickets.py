@@ -287,7 +287,8 @@ def check_for_tickets(driver):
             no_tickets_text = no_tickets_element.text.lower()
             if "sorry, we don't currently have any tickets for this event" in no_tickets_text:
                 logger.info(f"No tickets found")
-                return no_tickets
+                no_tickets=True
+                return
         except Exception as e:
             logger.debug(f"No 'no tickets' message found or failed to check: {e}")
 
