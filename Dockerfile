@@ -22,9 +22,9 @@ Set environment variables
 
 ENV CHROME_BIN=/usr/bin/chromium 
 
-ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver E
+ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver 
 
-NV DISPLAY=:99
+ENV DISPLAY=:99
 
 Create directories for logs and data
 
