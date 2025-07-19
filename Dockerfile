@@ -7,8 +7,6 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install system dependencies in one layer
-
-# Install system dependencies in one layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium chromium-driver xvfb \
     libnss3 libxss1 libasound2 libatk1.0-0 libatk-bridge2.0-0 \
