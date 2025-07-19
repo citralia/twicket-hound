@@ -279,16 +279,21 @@ def check_for_tickets(driver):
         except Exception as e:
             logger.debug(f"Failed to extract event date: {e}")
 
-        # Check for "no tickets" message
+        no_tickets = False
         try:
             wait = WebDriverWait(driver, 2)
             no_tickets_element = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div[1]/div[2]/div[5]/div/p/span")))
             no_tickets_text = no_tickets_element.text.lower()
             if "sorry, we don't currently have any tickets for this event" in no_tickets_text:
-                logger.info(f"No tickets found")
-                return
+                logger.info("No tickets found")
+                no_tickets = True
         except Exception as e:
             logger.debug(f"No 'no tickets' message found or failed to check: {e}")
+
+        # If no tickets message found, return early to wait for next search
+        if no_tickets:
+            last_ticket_results = None  # Reset results since no tickets are available
+            return
 
         # Ensure full page load
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
