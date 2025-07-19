@@ -1,5 +1,0 @@
-[build]
-builder = "Dockerfile"
-
-[start]
-cmd = "python twickets.py"
