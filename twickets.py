@@ -12,6 +12,9 @@ import html
 import os
 from shutil import which
 
+from selenium.common.exceptions import TimeoutException, WebDriverException
+from requests.exceptions import ReadTimeout, ConnectionError
+from urllib3.exceptions import ReadTimeoutError
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -229,10 +232,24 @@ def check_for_rate_limit(driver):
 
 def check_for_tickets(driver):
     global tickets_spotted, error_count, rate_limit_count, last_ticket_results, last_message_time
+    
     try:
         logger.info(f"🌐 Loading event page: {EVENT_URL}")
-        driver.get(EVENT_URL)
+        try:
+            driver.set_page_load_timeout(30)  # Prevent long hangs
+            driver.get(EVENT_URL)
+        except (TimeoutException, ReadTimeout, ReadTimeoutError, ConnectionError, WebDriverException) as e:
+            logger.error(f"Timeout or connection error loading {EVENT_URL}: {e}")
+            error_count += 1
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source or "No page source available")
+            logger.debug(f"Page source saved to page_source_{timestamp}.html")
+            return
+
         logger.debug(f"Page title: {driver.title}, URL: {driver.current_url}, Chrome version: {driver.capabilities['browserVersion']}, Headless: {driver.capabilities.get('chrome', {}).get('headless', False)}")
+        
+        # Check for rate limit
         if check_for_rate_limit(driver):
             return
 
@@ -244,7 +261,7 @@ def check_for_tickets(driver):
                 cookie_button.click()
                 logger.info("Clicked cookies accept button.")
             except:
-                logger.debug("XPath for cookies button failed, trying fallback CSS selector '.cookie-accept'")
+                logger.debug("Primary CSS selector for cookies button failed, trying fallback '.cookie-accept'")
                 cookie_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".cookie-accept")))
                 cookie_button.click()
                 logger.info("Clicked cookies accept button using CSS selector.")
@@ -283,50 +300,42 @@ def check_for_tickets(driver):
         try:
             wait = WebDriverWait(driver, 2)
             no_tickets_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#no-listings-found > div:nth-child(1) > p:nth-child(1) > span:nth-child(1)")))
-            no_tickets_text = no_tickets_element.text.lower()
-            if "sorry, we don't currently have any tickets for this event" in no_tickets_text:
-                logger.info(f"No tickets found")
+            if "sorry, we don't currently have any tickets for this event" in no_tickets_element.text.lower():
+                logger.info("No tickets found")
+                last_ticket_results = None
                 return
         except Exception as e:
             logger.debug(f"No 'no tickets' message found or failed to check: {e}")
 
         # Ensure full page load
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(random.uniform(3.0, 6.0))  # Increased delay for dynamic content
- 
-        ticket_items = []
+        try:
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(random.uniform(3.0, 6.0))
+        except WebDriverException as e:
+            logger.warning(f"Failed to scroll page: {e}")
 
+        # Check for ticket availability
         TICKET_SELECTOR = ".buy-button"
         wait = WebDriverWait(driver, 2)
-    
+        ticket_items = []
         try:
             ticket_items = wait.until(EC.visibility_of_any_elements_located((By.CSS_SELECTOR, TICKET_SELECTOR)))
             logger.debug(f"Found {len(ticket_items)} ticket items")
-            return ticket_items
         except Exception as e:
             logger.warning(f"No tickets found: {e}")
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
-                f.write(driver.page_source)
+                f.write(driver.page_source or "No page source available")
             logger.debug(f"Page source saved to page_source_{timestamp}.html")
-
-        if not ticket_items:
-            logger.error(f"All ticket selectors failed")
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
-                f.write(driver.page_source)
-            logger.debug(f"Page source saved to page_source_{timestamp}.html")
-            page_text = driver.page_source.lower()
+            page_text = driver.page_source.lower() if driver.page_source else ""
             error_indicators = ["captcha", "blocked", "access denied", "forbidden"]
             found_indicators = [term for term in error_indicators if term in page_text]
             if found_indicators:
                 logger.warning(f"Possible blocking detected: {found_indicators}")
+            last_ticket_results = None
             return
 
-        logger.debug(f"Found {len(ticket_items)} ticket items")
-
         available_tickets = []
-
         for ticket in ticket_items:
             try:
                 buy_button = ticket.find_elements(By.CSS_SELECTOR, "twickets-listing.width-max div.result-row-buy")
@@ -334,24 +343,18 @@ def check_for_tickets(driver):
                     try:
                         price_element = ticket.find_element(By.CSS_SELECTOR, "twickets-listing span strong:nth-child(2)")
                         price = html.escape(price_element.text.strip() or "Unknown")
-                        logger.debug(f"Extracted price: {price}")
                     except:
                         price = "Unknown"
-                        logger.debug("Failed to extract price")
                     try:
                         ticket_type_elements = ticket.find_elements(By.CSS_SELECTOR, "[id^='listingPriceTier']")
                         ticket_type = html.escape(ticket_type_elements[0].text.strip() or "Unknown") if ticket_type_elements else "Unknown"
-                        logger.debug(f"Extracted ticket type: {ticket_type}")
                     except:
                         ticket_type = "Unknown"
-                        logger.debug("Failed to extract ticket type")
                     try:
                         quantity_element = ticket.find_element(By.CSS_SELECTOR, "twickets-listing div:nth-child(2) span span")
                         quantity = html.escape(quantity_element.text.strip() or "Unknown")
-                        logger.debug(f"Extracted quantity: {quantity}")
                     except:
                         quantity = "Unknown"
-                        logger.debug("Failed to extract quantity")
                     available_tickets.append({"price": price, "quantity": quantity, "type": ticket_type})
                 else:
                     logger.debug("No Buy button found for this ticket, skipping.")
@@ -364,16 +367,13 @@ def check_for_tickets(driver):
             available_tickets.append({"price": f"£{random.randint(20, 100)}", "quantity": str(random.randint(1, 4)), "type": "General Admission"})
 
         if available_tickets:
-            # Create a comparable representation of ticket results
             current_results = sorted([(t["price"], t["quantity"], t["type"]) for t in available_tickets])
             results_hash = str(current_results)
             count = len(available_tickets)
-
-            # Check if results are identical to last sent
             should_send = False
             if last_ticket_results is None or results_hash != last_ticket_results:
                 logger.info(f"🎫 New or changed tickets found: {count} ticket(s) available!")
-                tickets_spotted += count  # Increment only for new/changed tickets
+                tickets_spotted += count
                 should_send = True
             elif last_message_time is None or (datetime.now() - last_message_time) >= timedelta(hours=RESEND_INTERVAL_HOURS):
                 logger.info(f"🎫 Resending identical tickets after {RESEND_INTERVAL_HOURS} hours: {count} ticket(s) available!")
@@ -393,19 +393,23 @@ def check_for_tickets(driver):
                     alert_msg += f"   🔢 <b>Quantity</b>: {ticket['quantity']}\n"
                     alert_msg += "----------------------------------------\n"
                 logger.debug(f"Sending ticket alert to {len(CHAT_ID)} chat IDs: {CHAT_ID}")
-                send_telegram_message(alert_msg)
-                last_ticket_results = results_hash
-                last_message_time = datetime.now()
+                try:
+                    send_telegram_message(alert_msg)
+                    last_ticket_results = results_hash
+                    last_message_time = datetime.now()
+                except (ReadTimeout, ReadTimeoutError, ConnectionError) as e:
+                    logger.error(f"Failed to send Telegram message: {e}")
+                    error_count += 1
         else:
             logger.info(f"No tickets with Buy button available right now.")
-            last_ticket_results = None  # Reset if no tickets found
+            last_ticket_results = None
 
     except Exception as e:
         error_count += 1
         logger.error(f"❌ Error during ticket check: {e}", exc_info=True)
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         with open(f"page_source_{timestamp}.html", "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
+            f.write(driver.page_source or "No page source available")
         logger.debug(f"Page source saved to page_source_{timestamp}.html")
 
 def reset_stats_if_new_day():
