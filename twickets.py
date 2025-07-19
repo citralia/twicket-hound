@@ -90,7 +90,7 @@ def send_telegram_message(text, retries=MAX_RETRIES, backoff=5):
                     logger.error(f"❌ Failed to send Telegram message to chat ID {chat_id} after {retries} retries.")
                 time.sleep(backoff * attempt)
             else:
-                break  # Exit retry loop if no exception
+                break
 
 def send_telegram_summary():
     global tickets_spotted, error_count
@@ -99,7 +99,6 @@ def send_telegram_summary():
         f"⏰ <b>Update</b> ({now}):\n"
         f"🎫 <b>Tickets Spotted</b>: {tickets_spotted}\n"
         f"⚠️ <b>Errors</b>: {error_count}\n"
-        # f"🚫 <b>Rate Limit Detections</b>: {rate_limit_count}"
     )
     logger.debug(f"Sending summary message to {len(CHAT_ID)} chat IDs: {CHAT_ID}")
     send_telegram_message(message)
